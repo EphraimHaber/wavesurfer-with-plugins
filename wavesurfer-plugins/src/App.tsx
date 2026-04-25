@@ -3,14 +3,14 @@ import WaveSurfer from 'wavesurfer.js'
 import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js'
 import TimelinePlugin from 'wavesurfer.js/dist/plugins/timeline.esm.js'
 import MinimapPlugin from 'wavesurfer.js/dist/plugins/minimap.esm.js'
-import SpectrogramPlugin from 'wavesurfer.js/dist/plugins/spectrogram.esm.js'
 import RecordPlugin from 'wavesurfer.js/dist/plugins/record.esm.js'
 import EnvelopePlugin from 'wavesurfer.js/dist/plugins/envelope.esm.js'
 import HoverPlugin from 'wavesurfer.js/dist/plugins/hover.esm.js'
 import ZoomPlugin from 'wavesurfer.js/dist/plugins/zoom.esm.js'
+import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router'
 import './App.css'
 
-const AUDIO_URL = 'https://wavesurfer.xyz/examples/audio/audio.wav'
+const AUDIO_URL = '/678785d0-0ead-4906-8f60-f68f22956a80.wav'
 
 function formatClock(seconds: number) {
   const minutes = Math.floor(seconds / 60)
@@ -43,8 +43,28 @@ function PluginCard({
   )
 }
 
+function AudioControls({ wsRef }: { wsRef: React.RefObject<WaveSurfer | null> }) {
+  const onPlayPause = () => wsRef.current?.playPause()
+  const onSkip = (seconds: number) => wsRef.current?.skip(seconds)
+
+  return (
+    <div className="audio-controls">
+      <button type="button" onClick={onPlayPause}>
+        Play / Pause
+      </button>
+      <button type="button" onClick={() => onSkip(-5)}>
+        Back 5s
+      </button>
+      <button type="button" onClick={() => onSkip(5)}>
+        Forward 5s
+      </button>
+    </div>
+  )
+}
+
 function RegionsDemo() {
   const waveformRef = useRef<HTMLDivElement | null>(null)
+  const wsRef = useRef<WaveSurfer | null>(null)
   const [loopEnabled, setLoopEnabled] = useState(true)
 
   useEffect(() => {
@@ -57,6 +77,7 @@ function RegionsDemo() {
       progressColor: '#4c1d95',
       plugins: [regions],
     })
+    wsRef.current = ws
 
     const randomColor = () =>
       `hsla(${Math.floor(Math.random() * 360)}, 80%, 60%, 0.35)`
@@ -97,11 +118,15 @@ function RegionsDemo() {
       }
     })
 
-    return () => ws.destroy()
+    return () => {
+      wsRef.current = null
+      ws.destroy()
+    }
   }, [loopEnabled])
 
   return (
     <div>
+      <AudioControls wsRef={wsRef} />
       <div ref={waveformRef} className="wave-container" />
       <label className="control-inline">
         <input
@@ -118,6 +143,7 @@ function RegionsDemo() {
 function TimelineDemo() {
   const waveformRef = useRef<HTMLDivElement | null>(null)
   const timelineRef = useRef<HTMLDivElement | null>(null)
+  const wsRef = useRef<WaveSurfer | null>(null)
 
   useEffect(() => {
     if (!waveformRef.current || !timelineRef.current) return
@@ -129,12 +155,17 @@ function TimelineDemo() {
       progressColor: '#0369a1',
       plugins: [TimelinePlugin.create({ container: timelineRef.current })],
     })
+    wsRef.current = ws
 
-    return () => ws.destroy()
+    return () => {
+      wsRef.current = null
+      ws.destroy()
+    }
   }, [])
 
   return (
     <div>
+      <AudioControls wsRef={wsRef} />
       <div ref={waveformRef} className="wave-container" />
       <div ref={timelineRef} className="timeline-container" />
     </div>
@@ -143,6 +174,7 @@ function TimelineDemo() {
 
 function MinimapDemo() {
   const waveformRef = useRef<HTMLDivElement | null>(null)
+  const wsRef = useRef<WaveSurfer | null>(null)
 
   useEffect(() => {
     if (!waveformRef.current) return
@@ -161,40 +193,78 @@ function MinimapDemo() {
         }),
       ],
     })
-    return () => ws.destroy()
+    wsRef.current = ws
+    return () => {
+      wsRef.current = null
+      ws.destroy()
+    }
   }, [])
 
-  return <div ref={waveformRef} className="wave-container" />
+  return (
+    <div>
+      <AudioControls wsRef={wsRef} />
+      <div ref={waveformRef} className="wave-container" />
+    </div>
+  )
 }
 
 function SpectrogramDemo() {
   const waveformRef = useRef<HTMLDivElement | null>(null)
+  const wsRef = useRef<WaveSurfer | null>(null)
+  const [spectrogramError, setSpectrogramError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!waveformRef.current) return
+    let cancelled = false
+    let ws: WaveSurfer | null = null
 
-    const ws = WaveSurfer.create({
-      container: waveformRef.current,
-      url: AUDIO_URL,
-      waveColor: '#22c55e',
-      progressColor: '#166534',
-      minPxPerSec: 80,
-      plugins: [
-        SpectrogramPlugin.create({
-          labels: true,
-          height: 180,
-          scale: 'mel',
-          fftSamples: 1024,
-          frequencyMax: 8000,
-          // Avoid Node worker_threads polyfill issues in Vite browser builds.
-          useWebWorker: false,
-        }),
-      ],
-    })
-    return () => ws.destroy()
+    import('wavesurfer.js/dist/plugins/spectrogram.esm.js')
+      .then((module) => {
+        if (cancelled || !waveformRef.current) return
+        ws = WaveSurfer.create({
+          container: waveformRef.current,
+          url: AUDIO_URL,
+          waveColor: '#22c55e',
+          progressColor: '#166534',
+          minPxPerSec: 80,
+          plugins: [
+            module.default.create({
+              labels: true,
+              height: 180,
+              scale: 'mel',
+              fftSamples: 1024,
+              frequencyMax: 8000,
+              useWebWorker: false,
+            }),
+          ],
+        })
+        wsRef.current = ws
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSpectrogramError(
+            'Spectrogram plugin failed to load in this runtime. Other demos still work.',
+          )
+        }
+      })
+
+    return () => {
+      cancelled = true
+      wsRef.current = null
+      if (ws) {
+        ws.destroy()
+        ws = null
+      }
+    }
   }, [])
 
-  return <div ref={waveformRef} className="wave-container spectrogram-wave" />
+  return (
+    <div>
+      <AudioControls wsRef={wsRef} />
+      {spectrogramError && <p className="record-error">{spectrogramError}</p>}
+      <div ref={waveformRef} className="wave-container spectrogram-wave" />
+    </div>
+  )
 }
 
 function RecordDemo() {
@@ -340,6 +410,7 @@ function RecordDemo() {
 
 function EnvelopeDemo() {
   const waveformRef = useRef<HTMLDivElement | null>(null)
+  const wsRef = useRef<WaveSurfer | null>(null)
   const [volume, setVolume] = useState('0.00')
 
   useEffect(() => {
@@ -350,6 +421,7 @@ function EnvelopeDemo() {
       waveColor: '#f472b6',
       progressColor: '#9d174d',
     })
+    wsRef.current = ws
     const envelope = ws.registerPlugin(
       EnvelopePlugin.create({
         volume: 0.9,
@@ -368,11 +440,15 @@ function EnvelopeDemo() {
     envelope.on('volume-change', updateVolume)
     ws.once('ready', updateVolume)
 
-    return () => ws.destroy()
+    return () => {
+      wsRef.current = null
+      ws.destroy()
+    }
   }, [])
 
   return (
     <div>
+      <AudioControls wsRef={wsRef} />
       <p className="control-inline">Current envelope volume: {volume}</p>
       <div ref={waveformRef} className="wave-container" />
     </div>
@@ -381,6 +457,7 @@ function EnvelopeDemo() {
 
 function HoverDemo() {
   const waveformRef = useRef<HTMLDivElement | null>(null)
+  const wsRef = useRef<WaveSurfer | null>(null)
 
   useEffect(() => {
     if (!waveformRef.current) return
@@ -399,10 +476,19 @@ function HoverDemo() {
         }),
       ],
     })
-    return () => ws.destroy()
+    wsRef.current = ws
+    return () => {
+      wsRef.current = null
+      ws.destroy()
+    }
   }, [])
 
-  return <div ref={waveformRef} className="wave-container" />
+  return (
+    <div>
+      <AudioControls wsRef={wsRef} />
+      <div ref={waveformRef} className="wave-container" />
+    </div>
+  )
 }
 
 function ZoomDemo() {
@@ -422,30 +508,77 @@ function ZoomDemo() {
     ws.registerPlugin(ZoomPlugin.create({ scale: 0.5, maxZoom: 300 }))
     ws.on('zoom', (next) => setMinPxPerSec(Math.round(next)))
     wsRef.current = ws
-    return () => ws.destroy()
+    return () => {
+      wsRef.current = null
+      ws.destroy()
+    }
   }, [])
-
-  const onPlayPause = () => wsRef.current?.playPause()
-  const onSkip = (seconds: number) => wsRef.current?.skip(seconds)
 
   return (
     <div>
       <p className="control-inline">minPxPerSec: {minPxPerSec}</p>
-      <div className="record-controls">
-        <button type="button" onClick={onPlayPause}>
-          Play / Pause
-        </button>
-        <button type="button" onClick={() => onSkip(-5)}>
-          Back 5s
-        </button>
-        <button type="button" onClick={() => onSkip(5)}>
-          Forward 5s
-        </button>
-      </div>
+      <AudioControls wsRef={wsRef} />
       <p className="record-hint">Use your mouse wheel over the waveform to zoom.</p>
       <div ref={waveformRef} className="wave-container" />
     </div>
   )
+}
+
+type PluginId =
+  | 'regions'
+  | 'timeline'
+  | 'minimap'
+  | 'spectrogram'
+  | 'record'
+  | 'envelope'
+  | 'hover'
+  | 'zoom'
+
+const PLUGIN_ORDER: PluginId[] = [
+  'regions',
+  'timeline',
+  'minimap',
+  'spectrogram',
+  'record',
+  'envelope',
+  'hover',
+  'zoom',
+]
+
+const pluginMeta: Record<PluginId, { title: string; description: string }> = {
+  regions: {
+    title: 'Regions',
+    description:
+      'Create draggable or resizable overlays for loops, labels, and markers.',
+  },
+  timeline: {
+    title: 'Timeline',
+    description: 'Display synchronized timestamps and time ticks under the waveform.',
+  },
+  minimap: {
+    title: 'Minimap',
+    description: 'Render a compact overview waveform for fast navigation.',
+  },
+  spectrogram: {
+    title: 'Spectrogram',
+    description: 'Visualize frequency content with FFT-based spectrogram rendering.',
+  },
+  record: {
+    title: 'Record',
+    description: 'Capture microphone audio and render it in real time.',
+  },
+  envelope: {
+    title: 'Envelope',
+    description: 'Control volume over time with editable gain points and fades.',
+  },
+  hover: {
+    title: 'Hover',
+    description: 'Show a vertical cursor line and precise timestamp while hovering.',
+  },
+  zoom: {
+    title: 'Zoom',
+    description: 'Enable interactive zooming for detailed waveform inspection.',
+  },
 }
 
 function App() {
@@ -471,72 +604,69 @@ function App() {
     [],
   )
 
+  const pluginContent: Record<PluginId, React.ReactNode> = {
+    regions: <RegionsDemo />,
+    timeline: <TimelineDemo />,
+    minimap: <MinimapDemo />,
+    spectrogram: <SpectrogramDemo />,
+    record: <RecordDemo />,
+    envelope: <EnvelopeDemo />,
+    hover: <HoverDemo />,
+    zoom: <ZoomDemo />,
+  }
+
+  const location = useLocation()
+  const pathnameId = location.pathname.replace('/', '') as PluginId
+  const activePlugin = PLUGIN_ORDER.includes(pathnameId) ? pathnameId : 'regions'
+  const activeIndex = PLUGIN_ORDER.indexOf(activePlugin)
+  const previousPlugin =
+    PLUGIN_ORDER[(activeIndex - 1 + PLUGIN_ORDER.length) % PLUGIN_ORDER.length]
+  const nextPlugin = PLUGIN_ORDER[(activeIndex + 1) % PLUGIN_ORDER.length]
+
   return (
     <main className="showcase">
       <header className="hero">
         <h1>Wavesurfer.js Plugins Showcase</h1>
-        <p>
-          Live demos for all official plugins with practical usage snippets.
-        </p>
+        <p>One plugin per page for focused review.</p>
       </header>
-      <section className="grid">
-        <PluginCard
-          title="Regions"
-          description="Create draggable or resizable overlays for loops, labels, and markers."
-          code={snippets.regions}
-        >
-          <RegionsDemo />
-        </PluginCard>
-        <PluginCard
-          title="Timeline"
-          description="Display synchronized timestamps and time ticks under the waveform."
-          code={snippets.timeline}
-        >
-          <TimelineDemo />
-        </PluginCard>
-        <PluginCard
-          title="Minimap"
-          description="Render a compact overview waveform for fast navigation."
-          code={snippets.minimap}
-        >
-          <MinimapDemo />
-        </PluginCard>
-        <PluginCard
-          title="Spectrogram"
-          description="Visualize frequency content with FFT-based spectrogram rendering."
-          code={snippets.spectrogram}
-        >
-          <SpectrogramDemo />
-        </PluginCard>
-        <PluginCard
-          title="Record"
-          description="Capture microphone audio and render it in real time."
-          code={snippets.record}
-        >
-          <RecordDemo />
-        </PluginCard>
-        <PluginCard
-          title="Envelope"
-          description="Control volume over time with editable gain points and fades."
-          code={snippets.envelope}
-        >
-          <EnvelopeDemo />
-        </PluginCard>
-        <PluginCard
-          title="Hover"
-          description="Show a vertical cursor line and precise timestamp while hovering."
-          code={snippets.hover}
-        >
-          <HoverDemo />
-        </PluginCard>
-        <PluginCard
-          title="Zoom"
-          description="Enable interactive zooming for detailed waveform inspection."
-          code={snippets.zoom}
-        >
-          <ZoomDemo />
-        </PluginCard>
+      <nav className="plugin-nav" aria-label="Plugin pages">
+        {PLUGIN_ORDER.map((id) => (
+          <NavLink
+            key={id}
+            to={`/${id}`}
+            className={id === activePlugin ? 'is-active' : ''}
+          >
+            {pluginMeta[id].title}
+          </NavLink>
+        ))}
+      </nav>
+      <section className="single-page">
+        <Routes>
+          {PLUGIN_ORDER.map((id) => (
+            <Route
+              key={id}
+              path={`/${id}`}
+              element={
+                <PluginCard
+                  title={pluginMeta[id].title}
+                  description={pluginMeta[id].description}
+                  code={snippets[id]}
+                >
+                  {pluginContent[id]}
+                </PluginCard>
+              }
+            />
+          ))}
+          <Route path="/" element={<Navigate to="/regions" replace />} />
+          <Route path="*" element={<Navigate to="/regions" replace />} />
+        </Routes>
       </section>
+      <div className="pager">
+        <NavLink to={`/${previousPlugin}`}>
+          Previous: {pluginMeta[previousPlugin].title}
+        </NavLink>
+        <NavLink to={`/${nextPlugin}`}>Next: {pluginMeta[nextPlugin].title}</NavLink>
+      </div>
       <footer className="footer">
         Audio source: <code>{AUDIO_URL}</code>
       </footer>
