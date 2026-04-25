@@ -10,7 +10,7 @@ import ZoomPlugin from 'wavesurfer.js/dist/plugins/zoom.esm.js'
 import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router'
 import './App.css'
 
-const AUDIO_URL = '/678785d0-0ead-4906-8f60-f68f22956a80.wav'
+const AUDIO_URL = `${import.meta.env.BASE_URL}678785d0-0ead-4906-8f60-f68f22956a80.wav`
 
 function formatClock(seconds: number) {
   const minutes = Math.floor(seconds / 60)
