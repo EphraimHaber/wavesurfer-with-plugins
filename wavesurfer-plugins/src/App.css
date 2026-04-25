@@ -400,6 +400,83 @@ body::before {
   );
 }
 
+.elan-header {
+  position: relative;
+  overflow: hidden;
+}
+
+.elan-header::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      112deg,
+      rgba(178, 90, 31, 0.07) 0%,
+      rgba(178, 90, 31, 0) 46%
+    ),
+    linear-gradient(
+      284deg,
+      rgba(79, 117, 96, 0.08) 8%,
+      rgba(79, 117, 96, 0) 55%
+    );
+}
+
+.elan-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--rule-soft);
+  border-radius: 999px;
+  padding: 0.22rem 0.62rem;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+  background: var(--cream);
+}
+
+.elan-view-shell {
+  background: color-mix(in oklab, var(--paper) 88%, var(--cream) 12%);
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius);
+  padding: 0.5rem;
+}
+
+.elan-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.elan-mode-card {
+  min-height: 4.3rem;
+}
+
+.elan-queue-row {
+  display: block;
+}
+
+.elan-queue-preview {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+@media (max-width: 900px) {
+  .elan-mode-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1279px) {
+  .elan-shell > aside {
+    position: static;
+  }
+}
+
 /* Reveal-on-row-hover for table create / delete buttons */
 .row-reveal {
   opacity: 0;

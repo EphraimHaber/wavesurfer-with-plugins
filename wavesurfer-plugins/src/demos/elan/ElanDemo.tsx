@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin from "wavesurfer.js/dist/plugins/regions.esm.js";
 import { motion, AnimatePresence } from "motion/react";
@@ -43,14 +43,18 @@ export function ElanDemo() {
   const [elanTable, setElanTable] = useState<ElanTableViewModel | null>(null);
   const [elanData, setElanData] = useState<ElanParsedData | null>(null);
   const [loopEnabled, setLoopEnabled] = useState(true);
-  const [view, setView] = useState<"document" | "lanes" | "table">("document");
+  const [workflowMode, setWorkflowMode] = useState<
+    "capture" | "compose" | "review"
+  >("compose");
   const [duration, setDuration] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [createTier, setCreateTier] = useState<string>("");
   const [xmlOpen, setXmlOpen] = useState(false);
   const [xmlContent, setXmlContent] = useState<string | null>(null);
-  const [selectedDraft, setSelectedDraft] = useState("");
+  const [draftById, setDraftById] = useState<Record<string, string>>({});
+  const [segmentQuery, setSegmentQuery] = useState("");
+  const [showOnlyNeedsText, setShowOnlyNeedsText] = useState(false);
 
   // Keep latest selected tier accessible from event handlers without re-binding
   useEffect(() => {
@@ -96,16 +100,17 @@ export function ElanDemo() {
     let audioReady = false;
     let parsedElan: ElanParsedData | null = null;
     let elanRegionsApplied = false;
+    const eafIds = eafIdsRef.current;
 
     const applyElanRegions = () => {
       if (elanRegionsApplied || !audioReady || !parsedElan) return;
       regions.clearRegions();
-      eafIdsRef.current.clear();
+      eafIds.clear();
       parsedElan.alignableAnnotations.forEach((ann, i) => {
         if (ann.start == null) return;
         const end = ann.end ?? ann.start;
         const isMarker = end <= ann.start;
-        eafIdsRef.current.add(ann.id);
+        eafIds.add(ann.id);
         regions.addRegion({
           id: ann.id,
           start: ann.start,
@@ -136,7 +141,7 @@ export function ElanDemo() {
 
     // Drag-selecting on the wave creates a new alignable in the active tier.
     const unsubRegionCreated = regions.on("region-created", (region) => {
-      if (eafIdsRef.current.has(region.id)) return;
+      if (eafIds.has(region.id)) return;
       const tierId = createTierRef.current;
       const start = region.start;
       const end = region.end ?? start;
@@ -156,13 +161,13 @@ export function ElanDemo() {
       }
       // Replace the auto-id region with the EAF-backed one.
       region.remove();
-      eafIdsRef.current.add(newId);
+      eafIds.add(newId);
       regions.addRegion({
         id: newId,
         start,
         end,
         content: newId,
-        color: colorForAlignableOrder(newId, eafIdsRef.current.size),
+        color: colorForAlignableOrder(newId, eafIds.size),
         drag: true,
         resize: true,
         contentEditable: false,
@@ -211,7 +216,7 @@ export function ElanDemo() {
       setElanData(null);
       setSelectedId(null);
       setEditingId(null);
-      eafIdsRef.current.clear();
+      eafIds.clear();
       regionsPluginRef.current = null;
       elanPluginRef.current = null;
       wsRef.current = null;
@@ -328,6 +333,12 @@ export function ElanDemo() {
 
   const tierIds = elanData?.tiers.map((t) => t.id) ?? [];
   const selectedAnnot = selectedId ? elanData?.annotations[selectedId] : undefined;
+  const alignableCount = elanData?.alignableAnnotations.length ?? 0;
+  const refCount = elanData
+    ? Object.values(elanData.annotations).filter(
+        (annot) => annot.type === "REF_ANNOTATION",
+      ).length
+    : 0;
 
   // For the "+ ref to" buttons: tiers that have at least one REF annotation
   // and don't already host a ref to the selected alignable.
@@ -357,284 +368,447 @@ export function ElanDemo() {
       ? selectedAnnot
       : selectedAnnot?.reference ?? null;
 
-  useEffect(() => {
-    setSelectedDraft(selectedAnnot?.value ?? "");
-  }, [selectedId, selectedAnnot?.value]);
+  const view =
+    workflowMode === "capture"
+      ? "lanes"
+      : workflowMode === "compose"
+        ? "document"
+        : "table";
+  const selectedDraftValue = selectedAnnot
+    ? (draftById[selectedAnnot.id] ?? selectedAnnot.value ?? "")
+    : "";
+
+  const segmentRows = useMemo(() => {
+    if (!elanTable) return [];
+    return elanTable.rows.map((row) => {
+      const textCells = row.cells.filter((cell) => !!cell.annotationId);
+      const filled = textCells.filter((cell) => (cell.value ?? "").trim().length > 0)
+        .length;
+      const preview =
+        textCells.find((cell) => (cell.value ?? "").trim().length > 0)?.value?.trim() ??
+        "";
+      const needsText = textCells.some((cell) => !(cell.value ?? "").trim());
+      return {
+        id: row.alignableId,
+        start: row.start,
+        end: row.end,
+        preview,
+        needsText,
+        completion: `${filled}/${textCells.length || 0}`,
+      };
+    });
+  }, [elanTable]);
+
+  const filteredRows = useMemo(() => {
+    const q = segmentQuery.trim().toLowerCase();
+    return segmentRows.filter((row) => {
+      if (showOnlyNeedsText && !row.needsText) return false;
+      if (!q) return true;
+      return row.id.toLowerCase().includes(q) || row.preview.toLowerCase().includes(q);
+    });
+  }, [segmentRows, segmentQuery, showOnlyNeedsText]);
 
   return (
-    <div className="elan-demo">
+    <div className="elan-demo space-y-4">
+      <header className="elan-header border border-rule rounded-paper bg-paper shadow-paper px-4 py-3">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+          <div>
+            <h2 className="m-0 font-display text-[1.35rem] text-ink">ELAN Workflow</h2>
+            <p className="m-0 mt-1 font-display italic text-[0.94rem] text-ink-soft">
+              Queue segments, work one at a time, then audit completeness.
+            </p>
+          </div>
+          <div className="flex-1" />
+          <div className="flex flex-wrap gap-1.5">
+            <span className="elan-meta-pill">{tierIds.length} tiers</span>
+            <span className="elan-meta-pill">{alignableCount} segments</span>
+            <span className="elan-meta-pill">{refCount} refs</span>
+          </div>
+        </div>
+      </header>
+
       <AudioControls wsRef={wsRef} />
 
-      {/* Persistent toolbar */}
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <div
-          role="tablist"
-          aria-label="View"
-          className="inline-flex bg-cream border border-ink rounded-paper overflow-hidden"
-        >
-          {(
-            [
-              { v: "document", Icon: AlignLeft, label: "Document" },
-              { v: "lanes", Icon: Rows3, label: "Lanes" },
-              { v: "table", Icon: Table2, label: "Table" },
-            ] as const
-          ).map(({ v, Icon, label }, i) => {
-            const isActive = view === v;
-            return (
-              <button
-                key={v}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                onClick={() => setView(v)}
-                className={[
-                  "inline-flex items-center gap-2 px-3.5 py-2 cursor-pointer transition",
-                  "font-mono text-[0.72rem] uppercase tracking-[0.08em] font-medium",
-                  i > 0 ? "border-l border-ink" : "",
-                  isActive ? "bg-ink text-cream" : "text-ink-soft hover:text-ink",
-                ].join(" ")}
-              >
-                <Icon size={14} strokeWidth={1.75} />
-                {label}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="flex-1" />
-
-        <label className="inline-flex items-center gap-1.5 font-mono text-[0.7rem] uppercase tracking-[0.06em] text-ink-soft cursor-pointer">
-          <input
-            type="checkbox"
-            checked={loopEnabled}
-            onChange={(e) => setLoopEnabled(e.target.checked)}
-            className="accent-ochre"
-          />
-          Loop
-        </label>
-
-        <button
-          type="button"
-          onClick={openXml}
-          className="inline-flex items-center gap-2 px-3 py-2 rounded-paper bg-transparent text-ink border border-ink font-mono text-[0.7rem] uppercase tracking-[0.08em] hover:bg-ink hover:text-cream transition"
-        >
-          <FileCode2 size={14} strokeWidth={1.75} />
-          View XML
-        </button>
-      </div>
-
-      <div
-        ref={waveformRef}
-        className="paper-hatched border border-rule rounded-paper min-h-[260px]"
-      />
-
-      {/* Contextual command bar */}
-      <div className="mt-3 mb-3">
-        <AnimatePresence mode="wait" initial={false}>
-          {selectedAnnot ? (
-            <motion.div
-              key="selected"
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.16 }}
-              className="selection-bar flex flex-wrap items-center gap-2 px-4 py-2 border border-rule rounded-paper shadow-paper font-mono text-[0.78rem]"
-            >
-              <span
-                className="w-2 h-2 rounded-full bg-ochre shrink-0"
-                style={{ boxShadow: "0 0 0 3px rgba(178,90,31,0.18)" }}
-                aria-hidden
+      <div className="elan-shell grid gap-4 xl:grid-cols-[18rem_minmax(0,1fr)_22rem]">
+        <aside className="border border-rule rounded-paper bg-paper shadow-paper p-3 md:p-4 xl:sticky xl:top-3 h-fit max-h-[74vh] overflow-hidden flex flex-col">
+          <div className="pb-2 border-b border-rule-soft">
+            <h3 className="m-0 font-mono text-[0.68rem] uppercase tracking-widest text-ink-soft">
+              Segment Queue
+            </h3>
+            <p className="m-0 mt-1 font-display text-[0.9rem] text-ink-mute">
+              Work through transcript chunks in order.
+            </p>
+          </div>
+          <div className="pt-2 space-y-2">
+            <input
+              value={segmentQuery}
+              onChange={(e) => setSegmentQuery(e.target.value)}
+              placeholder="Search id or text..."
+              className="w-full rounded-paper border border-rule bg-cream px-2.5 py-1.5 font-mono text-[0.73rem] text-ink placeholder:text-ink-mute/80 focus:outline-none focus:ring-2 focus:ring-ochre/35"
+            />
+            <label className="inline-flex items-center gap-1.5 font-mono text-[0.63rem] uppercase tracking-[0.08em] text-ink-soft cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showOnlyNeedsText}
+                onChange={(e) => setShowOnlyNeedsText(e.target.checked)}
+                className="accent-ochre"
               />
-              <code className="bg-cream text-ink px-1.5 py-0.5 rounded border border-rule font-semibold">
-                {selectedAnnot.id}
-              </code>
-              <span className="text-[0.62rem] uppercase tracking-[0.12em] text-sage border border-sage rounded-full px-2 py-0.5">
-                {selectedAnnot.type === "ALIGNABLE_ANNOTATION"
-                  ? "alignable"
-                  : "ref"}
-              </span>
-              <span
-                className="font-display text-[1rem] text-ink flex-1 min-w-24 not-italic overflow-hidden text-ellipsis whitespace-nowrap"
-                style={{ fontVariationSettings: '"opsz" 14' }}
-              >
-                {(selectedAnnot.value || "").slice(0, 80) || (
-                  <em className="italic text-ink-soft">empty</em>
-                )}
-              </span>
-              <button
-                type="button"
-                onClick={() => setEditingId(selectedAnnot.id)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-paper border border-ink bg-cream text-ink font-mono text-[0.68rem] uppercase tracking-[0.08em] hover:bg-ink hover:text-cream transition"
-              >
-                <Pencil size={12} strokeWidth={1.75} />
-                Edit
-              </button>
-              <button
-                type="button"
-                onClick={() => onDeleteAnnotation(selectedAnnot.id)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-paper border border-blood bg-cream text-blood font-mono text-[0.68rem] uppercase tracking-[0.08em] hover:bg-blood hover:text-cream transition"
-              >
-                <Trash2 size={12} strokeWidth={1.75} />
-                Delete
-              </button>
-              {selectedAligned && availableRefTiers.length > 0 ? (
-                <div className="flex items-center gap-1.5 pl-2 ml-1 border-l border-rule">
-                  <span className="text-ink-mute text-[0.66rem] uppercase tracking-widest">
-                    add ref →
-                  </span>
-                  {availableRefTiers.map((tierId) => (
-                    <button
-                      key={tierId}
-                      type="button"
-                      onClick={() => onCreateRef(tierId, selectedAligned.id)}
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded-paper border border-sage bg-transparent text-sage font-mono text-[0.66rem] tracking-[0.04em] hover:bg-sage hover:text-cream transition"
-                    >
-                      <Plus size={11} strokeWidth={2} />
-                      {tierId}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </motion.div>
-          ) : (
-            <motion.div
-              key="default"
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.16 }}
-              className="flex flex-wrap items-center gap-2 px-4 py-2 bg-paper border border-rule rounded-paper shadow-paper"
-            >
-              <span
-                className="font-display italic text-[0.92rem] text-ink-soft"
-                style={{ fontVariationSettings: '"opsz" 14, "SOFT" 80' }}
-              >
-                Drag on the waveform to add a segment, or
-              </span>
-              <div className="inline-flex bg-cream border border-ink rounded-paper overflow-hidden">
-                <select
-                  value={createTier}
-                  onChange={(e) => setCreateTier(e.target.value)}
-                  className="bg-transparent text-ink border-0 border-r border-ink px-2 py-1.5 font-mono text-[0.78rem] cursor-pointer focus:outline-none focus:bg-paper-2"
-                  aria-label="Tier for new annotation"
-                >
-                  {tierIds.map((id) => (
-                    <option key={id} value={id}>
-                      {id}
-                    </option>
-                  ))}
-                </select>
+              Needs text only
+            </label>
+          </div>
+          <div className="mt-2 flex-1 overflow-auto pr-1 space-y-1.5">
+            {filteredRows.map((row) => {
+              const isSelected = selectedAligned?.id === row.id;
+              return (
                 <button
+                  key={row.id}
                   type="button"
-                  onClick={onCreateAlignable}
-                  disabled={!createTier || !elanData}
-                  className="inline-flex items-center gap-1.5 bg-ochre text-cream border-0 px-3 py-1.5 font-mono text-[0.72rem] uppercase tracking-[0.06em] font-semibold cursor-pointer transition hover:bg-ochre-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                  onClick={() => onSelectBlock(row.id, row.start)}
+                  className={[
+                    "elan-queue-row w-full text-left rounded-paper border px-2.5 py-2 transition",
+                    isSelected
+                      ? "border-ochre bg-ochre-soft/50"
+                      : "border-rule-soft bg-cream hover:border-ink-soft hover:bg-paper-2/70",
+                  ].join(" ")}
                 >
-                  <Plus size={14} strokeWidth={2} />
-                  Add at playhead
+                  <div className="flex items-center gap-2">
+                    <code className="font-mono text-[0.66rem] text-ink-soft">{row.id}</code>
+                    <span className="ml-auto font-mono text-[0.62rem] uppercase tracking-[0.08em] text-ink-mute">
+                      {row.completion}
+                    </span>
+                  </div>
+                  <p className="elan-queue-preview m-0 mt-1 font-display text-[0.9rem] leading-snug text-ink">
+                    {row.preview || <em className="not-italic text-ink-mute">No text yet</em>}
+                  </p>
                 </button>
-              </div>
-              <span className="flex-1" />
-              <span className="hidden md:inline-flex items-center gap-1.5 font-mono text-[0.66rem] uppercase tracking-[0.08em] text-ink-mute">
-                <CornerDownLeft size={11} strokeWidth={1.75} />
-                Enter edit · Del remove · Esc deselect
-              </span>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+              );
+            })}
+            {filteredRows.length === 0 ? (
+              <p className="m-0 px-1 py-2 font-display italic text-[0.9rem] text-ink-mute">
+                No segments match this filter.
+              </p>
+            ) : null}
+          </div>
+        </aside>
 
-      {selectedAnnot ? (
-        <div className="mb-3 p-3 border border-rule rounded-paper bg-cream shadow-paper">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-            <span className="font-mono text-[0.66rem] uppercase tracking-[0.08em] text-ink-soft">
-              Selected annotation text (wraps, no truncation)
+        <section className="border border-rule rounded-paper bg-paper shadow-paper p-3 md:p-4 space-y-3">
+          <div className="elan-mode-grid">
+            {(
+              [
+                {
+                  id: "capture",
+                  title: "Capture",
+                  subtitle: "Create and trim segments",
+                  Icon: Rows3,
+                },
+                {
+                  id: "compose",
+                  title: "Compose",
+                  subtitle: "Write transcript and notes",
+                  Icon: AlignLeft,
+                },
+                {
+                  id: "review",
+                  title: "Review",
+                  subtitle: "Scan table for gaps",
+                  Icon: Table2,
+                },
+              ] as const
+            ).map(({ id, title, subtitle, Icon }) => {
+              const active = workflowMode === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setWorkflowMode(id)}
+                  className={[
+                    "elan-mode-card rounded-paper border px-3 py-2 text-left transition",
+                    active
+                      ? "border-ink bg-ink text-cream"
+                      : "border-rule-soft bg-cream hover:border-ink-soft",
+                  ].join(" ")}
+                >
+                  <div className="flex items-center gap-2">
+                    <Icon size={14} strokeWidth={1.75} />
+                    <span className="font-mono text-[0.68rem] uppercase tracking-widest">
+                      {title}
+                    </span>
+                  </div>
+                  <p
+                    className={[
+                      "m-0 mt-1 font-display text-[0.88rem] leading-snug",
+                      active ? "text-cream/85" : "text-ink-soft",
+                    ].join(" ")}
+                  >
+                    {subtitle}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="inline-flex items-center gap-1.5 font-mono text-[0.7rem] uppercase tracking-[0.06em] text-ink-soft cursor-pointer">
+              <input
+                type="checkbox"
+                checked={loopEnabled}
+                onChange={(e) => setLoopEnabled(e.target.checked)}
+                className="accent-ochre"
+              />
+              Loop selected
+            </label>
+            <span className="flex-1" />
+            <button
+              type="button"
+              onClick={openXml}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-paper bg-transparent text-ink border border-ink font-mono text-[0.7rem] uppercase tracking-[0.08em] hover:bg-ink hover:text-cream transition"
+            >
+              <FileCode2 size={14} strokeWidth={1.75} />
+              View XML
+            </button>
+          </div>
+
+          <div
+            ref={waveformRef}
+            className="paper-hatched border border-rule rounded-paper min-h-[260px]"
+          />
+
+          <div className="flex flex-wrap items-center gap-2 px-3 py-2 border border-rule rounded-paper bg-cream">
+            <span
+              className="font-display italic text-[0.92rem] text-ink-soft"
+              style={{ fontVariationSettings: '"opsz" 14, "SOFT" 80' }}
+            >
+              Drag to create a segment, or add one at the playhead:
             </span>
-            <span className="font-mono text-[0.68rem] tabular-nums text-ink-mute">
-              {selectedDraft.length} chars
+            <div className="inline-flex bg-cream border border-ink rounded-paper overflow-hidden">
+              <select
+                value={createTier}
+                onChange={(e) => setCreateTier(e.target.value)}
+                className="bg-transparent text-ink border-0 border-r border-ink px-2 py-1.5 font-mono text-[0.78rem] cursor-pointer focus:outline-none focus:bg-paper-2"
+                aria-label="Tier for new annotation"
+              >
+                {tierIds.map((id) => (
+                  <option key={id} value={id}>
+                    {id}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={onCreateAlignable}
+                disabled={!createTier || !elanData}
+                className="inline-flex items-center gap-1.5 bg-ochre text-cream border-0 px-3 py-1.5 font-mono text-[0.72rem] uppercase tracking-[0.06em] font-semibold cursor-pointer transition hover:bg-ochre-2 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Plus size={14} strokeWidth={2} />
+                Add at playhead
+              </button>
+            </div>
+            <span className="flex-1" />
+            <span className="hidden lg:inline-flex items-center gap-1.5 font-mono text-[0.66rem] uppercase tracking-[0.08em] text-ink-mute">
+              <CornerDownLeft size={11} strokeWidth={1.75} />
+              Enter edit · Del remove · Esc deselect
             </span>
           </div>
-          <textarea
-            value={selectedDraft}
-            onChange={(e) => setSelectedDraft(e.target.value)}
-            onBlur={() => {
-              if (selectedDraft !== selectedAnnot.value) {
-                onEditValue(selectedAnnot.id, selectedDraft);
-              }
-            }}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                e.preventDefault();
-                if (selectedDraft !== selectedAnnot.value) {
-                  onEditValue(selectedAnnot.id, selectedDraft);
-                }
-              }
-            }}
-            className="w-full min-h-24 resize-y rounded-paper border border-rule bg-paper px-3 py-2 font-display text-[0.95rem] leading-relaxed text-ink focus:outline-none focus:ring-2 focus:ring-ochre/45"
-            placeholder="Annotation text..."
-            aria-label={`Annotation text for ${selectedAnnot.id}`}
-          />
-          <p className="m-0 mt-2 font-mono text-[0.63rem] uppercase tracking-[0.07em] text-ink-mute">
-            Cmd/Ctrl+Enter to apply immediately
-          </p>
-        </div>
-      ) : null}
 
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={view}
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -4 }}
-          transition={{ duration: 0.22, ease: "easeOut" }}
-        >
-          {view === "document" ? (
-            elanData && elanTable ? (
-              <ElanDocument
-                data={elanData}
-                table={elanTable}
-                selectedId={selectedId}
-                onSelect={onSelectBlock}
-                onEdit={onEditValue}
-                onCreateRef={onCreateRef}
-              />
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={view}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+              className="elan-view-shell"
+            >
+              {view === "document" ? (
+                elanData && elanTable ? (
+                  <ElanDocument
+                    data={elanData}
+                    table={elanTable}
+                    selectedId={selectedId}
+                    onSelect={onSelectBlock}
+                    onEdit={onEditValue}
+                    onCreateRef={onCreateRef}
+                  />
+                ) : (
+                  <EmptyLoading />
+                )
+              ) : view === "lanes" ? (
+                elanData && elanTable && duration > 0 ? (
+                  <ElanLanes
+                    data={elanData}
+                    table={elanTable}
+                    duration={duration}
+                    selectedId={selectedId}
+                    editingId={editingId}
+                    setEditingId={setEditingId}
+                    onSelect={onSelectBlock}
+                    onDelete={onDeleteAnnotation}
+                    onEdit={onEditValue}
+                    onCreateRef={onCreateRef}
+                  />
+                ) : (
+                  <EmptyLoading />
+                )
+              ) : elanData && elanTable ? (
+                <ElanTable
+                  data={elanData}
+                  table={elanTable}
+                  selectedId={selectedId}
+                  editingId={editingId}
+                  setEditingId={setEditingId}
+                  onSelect={onSelectBlock}
+                  onDelete={onDeleteAnnotation}
+                  onEdit={onEditValue}
+                  onCreateRef={onCreateRef}
+                />
+              ) : (
+                <EmptyLoading />
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </section>
+
+        <aside className="border border-rule rounded-paper bg-paper shadow-paper p-3 md:p-4 xl:sticky xl:top-3 h-fit">
+          <AnimatePresence mode="wait" initial={false}>
+            {selectedAnnot ? (
+              <motion.div
+                key="selection"
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.16 }}
+                className="space-y-3"
+              >
+                <div className="pb-2 border-b border-rule-soft">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="w-2 h-2 rounded-full bg-ochre shrink-0"
+                      style={{ boxShadow: "0 0 0 3px rgba(178,90,31,0.18)" }}
+                      aria-hidden
+                    />
+                    <code className="bg-cream text-ink px-1.5 py-0.5 rounded border border-rule font-mono text-[0.72rem]">
+                      {selectedAnnot.id}
+                    </code>
+                    <span className="text-[0.62rem] uppercase tracking-[0.12em] text-sage border border-sage rounded-full px-2 py-0.5 font-mono">
+                      {selectedAnnot.type === "ALIGNABLE_ANNOTATION"
+                        ? "alignable"
+                        : "ref"}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="font-mono text-[0.66rem] uppercase tracking-[0.08em] text-ink-soft">
+                      Text
+                    </span>
+                    <span className="font-mono text-[0.68rem] tabular-nums text-ink-mute">
+                      {selectedDraftValue.length} chars
+                    </span>
+                  </div>
+                  <textarea
+                    value={selectedDraftValue}
+                    onChange={(e) =>
+                      setDraftById((cur) => ({
+                        ...cur,
+                        [selectedAnnot.id]: e.target.value,
+                      }))
+                    }
+                    onBlur={() => {
+                      if (selectedDraftValue !== selectedAnnot.value) {
+                        onEditValue(selectedAnnot.id, selectedDraftValue);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                        e.preventDefault();
+                        if (selectedDraftValue !== selectedAnnot.value) {
+                          onEditValue(selectedAnnot.id, selectedDraftValue);
+                        }
+                      }
+                    }}
+                    className="w-full min-h-28 resize-y rounded-paper border border-rule bg-cream px-3 py-2 font-display text-[0.95rem] leading-relaxed text-ink focus:outline-none focus:ring-2 focus:ring-ochre/45"
+                    placeholder="Annotation text..."
+                    aria-label={`Annotation text for ${selectedAnnot.id}`}
+                  />
+                  <p className="m-0 mt-1.5 font-mono text-[0.63rem] uppercase tracking-[0.07em] text-ink-mute">
+                    Cmd/Ctrl+Enter to apply now
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingId(selectedAnnot.id)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-paper border border-ink bg-cream text-ink font-mono text-[0.68rem] uppercase tracking-[0.08em] hover:bg-ink hover:text-cream transition"
+                  >
+                    <Pencil size={12} strokeWidth={1.75} />
+                    Inline edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDeleteAnnotation(selectedAnnot.id)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-paper border border-blood bg-cream text-blood font-mono text-[0.68rem] uppercase tracking-[0.08em] hover:bg-blood hover:text-cream transition"
+                  >
+                    <Trash2 size={12} strokeWidth={1.75} />
+                    Delete
+                  </button>
+                </div>
+
+                {selectedAligned && availableRefTiers.length > 0 ? (
+                  <div className="pt-2 border-t border-rule-soft">
+                    <p className="m-0 mb-1.5 font-mono text-[0.62rem] uppercase tracking-widest text-ink-mute">
+                      Add reference on tier
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {availableRefTiers.map((tierId) => (
+                        <button
+                          key={tierId}
+                          type="button"
+                          onClick={() => onCreateRef(tierId, selectedAligned.id)}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-paper border border-sage bg-transparent text-sage font-mono text-[0.66rem] tracking-[0.04em] hover:bg-sage hover:text-cream transition"
+                        >
+                          <Plus size={11} strokeWidth={2} />
+                          {tierId}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </motion.div>
             ) : (
-              <EmptyLoading />
-            )
-          ) : view === "lanes" ? (
-            elanData && elanTable && duration > 0 ? (
-              <ElanLanes
-                data={elanData}
-                table={elanTable}
-                duration={duration}
-                selectedId={selectedId}
-                editingId={editingId}
-                setEditingId={setEditingId}
-                onSelect={onSelectBlock}
-                onDelete={onDeleteAnnotation}
-                onEdit={onEditValue}
-                onCreateRef={onCreateRef}
-              />
-            ) : (
-              <EmptyLoading />
-            )
-          ) : elanData && elanTable ? (
-            <ElanTable
-              data={elanData}
-              table={elanTable}
-              selectedId={selectedId}
-              editingId={editingId}
-              setEditingId={setEditingId}
-              onSelect={onSelectBlock}
-              onDelete={onDeleteAnnotation}
-              onEdit={onEditValue}
-              onCreateRef={onCreateRef}
-            />
-          ) : (
-            <EmptyLoading />
-          )}
-        </motion.div>
-      </AnimatePresence>
+              <motion.div
+                key="empty-selection"
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.16 }}
+                className="space-y-3"
+              >
+                <h3 className="m-0 font-mono text-[0.68rem] uppercase tracking-widest text-ink-soft">
+                  Inspector
+                </h3>
+                <p
+                  className="m-0 font-display italic text-[0.95rem] text-ink-soft"
+                  style={{ fontVariationSettings: '"opsz" 14, "SOFT" 70' }}
+                >
+                  Select an annotation in the waveform, document, lanes, or table.
+                </p>
+                <div className="border border-rule-soft rounded-paper bg-cream px-3 py-2">
+                  <p className="m-0 mb-1 font-mono text-[0.62rem] uppercase tracking-widest text-ink-mute">
+                    Workflow
+                  </p>
+                  <ol className="m-0 pl-4 space-y-1 font-display text-[0.9rem] text-ink-soft">
+                    <li>Create or pick a segment.</li>
+                    <li>Type text in the inspector.</li>
+                    <li>Add reference comments from note tiers.</li>
+                  </ol>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </aside>
+      </div>
 
       <XmlModal open={xmlOpen} xml={xmlContent} onClose={closeXml} />
     </div>
