@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin from "wavesurfer.js/dist/plugins/regions.esm.js";
 import { AudioControls } from "../components/AudioControls";
@@ -12,15 +12,24 @@ import {
 import { colorForIndex } from "../lib/format";
 
 export function RegionsDemo() {
-  const waveformRef = useRef<HTMLDivElement | null>(null);
   const wsRef = useRef<WaveSurfer | null>(null);
   const [loopEnabled, setLoopEnabled] = useState(true);
-
+  const loopEnabledRef = useRef(loopEnabled);
   useEffect(() => {
-    if (!waveformRef.current) return;
+    loopEnabledRef.current = loopEnabled;
+  }, [loopEnabled]);
+
+  const waveformRef = useCallback((node: HTMLDivElement | null) => {
+    if (!node) {
+      wsRef.current?.destroy();
+      wsRef.current = null;
+      return;
+    }
+    if (wsRef.current) return;
+
     const regions = RegionsPlugin.create();
     const ws = WaveSurfer.create({
-      container: waveformRef.current,
+      container: node,
       url: AUDIO_URL,
       waveColor: WAVE_COLOR,
       progressColor: WAVE_PROGRESS,
@@ -61,14 +70,9 @@ export function RegionsDemo() {
     });
 
     regions.on("region-out", (region) => {
-      if (loopEnabled && activeRegion === region) region.play();
+      if (loopEnabledRef.current && activeRegion === region) region.play();
     });
-
-    return () => {
-      wsRef.current = null;
-      ws.destroy();
-    };
-  }, [loopEnabled]);
+  }, []);
 
   return (
     <div>

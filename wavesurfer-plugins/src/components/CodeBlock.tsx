@@ -54,7 +54,8 @@ export function CodeBlock({
           </span>
           <code className="block">
             {tokens.map((line, i) => {
-              const { key: _lk, className: lc, ...lineRest } = getLineProps({ line });
+              const { className: lc, ...lineRest } = getLineProps({ line });
+              delete (lineRest as { key?: unknown }).key;
               return (
                 <div key={i} {...lineRest} className={`${lc ?? ""} table-row`}>
                   <span className="table-cell pr-4 select-none text-ink-mute opacity-60 text-right tabular-nums w-[2ch]">
@@ -62,7 +63,8 @@ export function CodeBlock({
                   </span>
                   <span className="table-cell">
                     {line.map((token, j) => {
-                      const { key: _tk, ...tokenRest } = getTokenProps({ token });
+                      const tokenRest = getTokenProps({ token });
+                      delete (tokenRest as { key?: unknown }).key;
                       return <span key={j} {...tokenRest} />;
                     })}
                   </span>

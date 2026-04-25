@@ -121,7 +121,7 @@ export function ElanDemo() {
           <button
             type="button"
             onClick={() => setXmlOpen(true)}
-            className="inline-flex items-center gap-1.5 font-mono text-[0.66rem] uppercase tracking-[0.1em] text-ink-soft hover:text-ochre underline-offset-4 hover:underline"
+            className="inline-flex items-center gap-1.5 font-mono text-[0.66rem] uppercase tracking-widest text-ink-soft hover:text-ochre underline-offset-4 hover:underline"
           >
             <FileCode2 size={13} strokeWidth={1.75} />
             View XML
@@ -224,7 +224,7 @@ function ModeTabs({
             <span
               aria-hidden
               className={[
-                "absolute -bottom-[7px] left-0 right-0 h-[2px] transition",
+                "absolute bottom-[-7px] left-0 right-0 h-[2px] transition",
                 active ? "bg-ochre" : "bg-transparent",
               ].join(" ")}
             />
