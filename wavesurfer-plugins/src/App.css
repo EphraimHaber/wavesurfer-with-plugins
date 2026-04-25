@@ -5,7 +5,7 @@
   --border: #e5e4e7;
   --code-bg: #f4f3ec;
   --social-bg: rgba(244, 243, 236, 0.5);
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --sans: system-ui, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
@@ -52,7 +52,6 @@ h2 {
 }
 
 .showcase {
-  width: min(1500px, 100%);
   margin: 0 auto;
   padding: 2.5rem 1.25rem 3.5rem;
   box-sizing: border-box;
@@ -210,4 +209,115 @@ h2 {
   display: flex;
   justify-content: space-between;
   gap: 0.75rem;
+}
+
+.elan-annotations {
+  margin-top: 0.75rem;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem;
+  background: var(--code-bg);
+}
+
+table.wavesurfer-annotations {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+table.wavesurfer-annotations th,
+table.wavesurfer-annotations td {
+  border: 1px solid var(--border);
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+table.wavesurfer-annotations th {
+  color: var(--text-h);
+  font-weight: 600;
+  background: var(--bg);
+}
+
+table.wavesurfer-annotations td.wavesurfer-time {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+table.wavesurfer-annotations tbody tr:nth-child(even) {
+  background: rgba(127, 127, 127, 0.06);
+}
+
+table.wavesurfer-annotations td[data-ref] {
+  cursor: pointer;
+}
+
+table.wavesurfer-annotations td[data-ref]:hover {
+  background: rgba(52, 211, 153, 0.12);
+}
+
+.xml-popup-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.xml-popup-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(1400px, 98vw);
+  max-width: 98vw;
+  height: min(94vh, 100%);
+  max-height: 94vh;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+}
+
+.xml-popup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.xml-popup-head h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.xml-popup-head button {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-h);
+  border-radius: 6px;
+  padding: 0.35rem 0.65rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.xml-popup-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0.85rem 1.15rem 1.15rem;
+  overflow: auto;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.xml-popup-empty {
+  margin: 0;
+  color: var(--text);
 }
