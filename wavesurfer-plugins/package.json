@@ -10,10 +10,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource-variable/fraunces": "^5.2.9",
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@tailwindcss/vite": "^4.2.4",
+    "lucide-react": "^1.11.0",
+    "motion": "^12.38.0",
+    "prism-react-renderer": "^2.4.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-router": "^7.14.2",
-    "react-xml-viewer": "^3.0.4",
+    "tailwindcss": "^4.2.4",
     "wavesurfer.js": "^7.12.6"
   },
   "devDependencies": {

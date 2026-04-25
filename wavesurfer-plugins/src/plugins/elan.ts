@@ -98,6 +98,20 @@ export type ElanPluginEvents = BasePluginEvents & {
   eafUpdated: []
 }
 
+/** Walk `reference` until reaching the underlying ALIGNABLE_ANNOTATION (or null). */
+export function resolveAlignable(
+  annot: ElanAnnotation | undefined | null,
+): ElanAnnotation | null {
+  let cur: ElanAnnotation | undefined | null = annot
+  const seen = new Set<string>()
+  while (cur && cur.type !== ALIGNABLE_ANNOTATION) {
+    if (seen.has(cur.id)) return null
+    seen.add(cur.id)
+    cur = cur.reference
+  }
+  return cur ?? null
+}
+
 /**
  * Build the same row/column grid the legacy in-plugin table used, from parsed data.
  * Safe to call from React render; does not read plugin state.
@@ -480,6 +494,213 @@ export default class ElanPlugin extends WaveSurfer.BasePlugin<ElanPluginEvents, 
       return d
     })
     this.data.length = this.data.alignableAnnotations.length
+  }
+
+  /**
+   * Create a new ALIGNABLE_ANNOTATION on `tierId` spanning [startSec, endSec].
+   * Allocates two new TIME_SLOTs and inserts the annotation into the EAF.
+   * Returns the new ANNOTATION_ID, or null if the host isn't ready.
+   */
+  createAlignableAnnotation(
+    tierId: string,
+    startSec: number,
+    endSec: number,
+    value = '',
+  ): string | null {
+    if (!this.data || !this.xmlDoc) return null
+    const tier = this.data.tiers.find((t) => t.id === tierId)
+    if (!tier) return null
+    const tierEl = this.xmlDoc.querySelector(`TIER[TIER_ID="${tierId}"]`)
+    const timeOrderEl = this.xmlDoc.querySelector('TIME_ORDER')
+    if (!tierEl || !timeOrderEl) return null
+
+    let start = Math.max(0, startSec)
+    let end = Math.max(start, endSec)
+    const dur = this.wavesurfer?.getDuration()
+    if (dur != null && Number.isFinite(dur) && dur > 0) {
+      end = Math.min(end, dur)
+      start = Math.min(start, end)
+    }
+
+    const ts1 = this.nextTimeSlotId(0)
+    const ts2 = this.nextTimeSlotId(1)
+    const annId = this.nextAnnotationId()
+
+    const slot1 = this.xmlDoc.createElement('TIME_SLOT')
+    slot1.setAttribute('TIME_SLOT_ID', ts1)
+    slot1.setAttribute('TIME_VALUE', this.formatTimeValue(start))
+    const slot2 = this.xmlDoc.createElement('TIME_SLOT')
+    slot2.setAttribute('TIME_SLOT_ID', ts2)
+    slot2.setAttribute('TIME_VALUE', this.formatTimeValue(end))
+    timeOrderEl.appendChild(slot1)
+    timeOrderEl.appendChild(slot2)
+
+    const wrapper = this.xmlDoc.createElement('ANNOTATION')
+    const alignableEl = this.xmlDoc.createElement('ALIGNABLE_ANNOTATION')
+    alignableEl.setAttribute('ANNOTATION_ID', annId)
+    alignableEl.setAttribute('TIME_SLOT_REF1', ts1)
+    alignableEl.setAttribute('TIME_SLOT_REF2', ts2)
+    const valueEl = this.xmlDoc.createElement('ANNOTATION_VALUE')
+    valueEl.textContent = value
+    alignableEl.appendChild(valueEl)
+    wrapper.appendChild(alignableEl)
+    tierEl.appendChild(wrapper)
+
+    const annot: ElanAnnotation = {
+      type: ALIGNABLE_ANNOTATION,
+      id: annId,
+      ref: null,
+      value,
+      start,
+      end,
+      timeSlotRef1: ts1,
+      timeSlotRef2: ts2,
+    }
+    this.data.timeOrder[ts1] = start
+    this.data.timeOrder[ts2] = end
+    this.data.annotations[annId] = annot
+    this.data.alignableAnnotations.push(annot)
+    tier.annotations.push(annot)
+
+    this.sortAlignableAnnotationsInPlace()
+    this.refreshTableView()
+    this.emitEafUpdated()
+    return annId
+  }
+
+  /**
+   * Create a new REF_ANNOTATION on `tierId` whose ANNOTATION_REF is `refAnnotationId`.
+   * Returns the new ANNOTATION_ID, or null if inputs are invalid.
+   */
+  createRefAnnotation(
+    tierId: string,
+    refAnnotationId: string,
+    value = '',
+  ): string | null {
+    if (!this.data || !this.xmlDoc) return null
+    const tier = this.data.tiers.find((t) => t.id === tierId)
+    const refAnnot = this.data.annotations[refAnnotationId]
+    if (!tier || !refAnnot) return null
+    const tierEl = this.xmlDoc.querySelector(`TIER[TIER_ID="${tierId}"]`)
+    if (!tierEl) return null
+
+    const annId = this.nextAnnotationId()
+    const wrapper = this.xmlDoc.createElement('ANNOTATION')
+    const refEl = this.xmlDoc.createElement('REF_ANNOTATION')
+    refEl.setAttribute('ANNOTATION_ID', annId)
+    refEl.setAttribute('ANNOTATION_REF', refAnnotationId)
+    const valueEl = this.xmlDoc.createElement('ANNOTATION_VALUE')
+    valueEl.textContent = value
+    refEl.appendChild(valueEl)
+    wrapper.appendChild(refEl)
+    tierEl.appendChild(wrapper)
+
+    const annot: ElanAnnotation = {
+      type: REF_ANNOTATION,
+      id: annId,
+      ref: refAnnotationId,
+      value,
+      reference: refAnnot,
+    }
+    this.data.annotations[annId] = annot
+    tier.annotations.push(annot)
+
+    this.refreshTableView()
+    this.emitEafUpdated()
+    return annId
+  }
+
+  /**
+   * Remove an annotation. Cascades: deleting an alignable also deletes any
+   * REF_ANNOTATIONs that point to it (transitively), and prunes orphaned
+   * TIME_SLOTs from the EAF.
+   */
+  deleteAnnotation(annotationId: string): boolean {
+    if (!this.data || !this.xmlDoc) return false
+    const annot = this.data.annotations[annotationId]
+    if (!annot) return false
+
+    if (annot.type === ALIGNABLE_ANNOTATION) {
+      const dependents = Object.values(this.data.annotations)
+        .filter((a) => a.ref === annotationId)
+        .map((a) => a.id)
+      for (const id of dependents) this.deleteAnnotation(id)
+    }
+
+    const xmlEl = this.xmlDoc.querySelector(
+      `${annot.type}[ANNOTATION_ID="${annotationId}"]`,
+    )
+    const annotationWrapper = xmlEl?.parentElement
+    annotationWrapper?.parentElement?.removeChild(annotationWrapper)
+
+    if (annot.type === ALIGNABLE_ANNOTATION) {
+      for (const ts of [annot.timeSlotRef1, annot.timeSlotRef2]) {
+        if (!ts) continue
+        const stillUsed = Object.values(this.data.annotations).some(
+          (a) =>
+            a.id !== annotationId &&
+            (a.timeSlotRef1 === ts || a.timeSlotRef2 === ts),
+        )
+        if (!stillUsed) {
+          const slot = this.xmlDoc.querySelector(
+            `TIME_SLOT[TIME_SLOT_ID="${ts}"]`,
+          )
+          slot?.parentElement?.removeChild(slot)
+          delete this.data.timeOrder[ts]
+        }
+      }
+      const idx = this.data.alignableAnnotations.findIndex(
+        (a) => a.id === annotationId,
+      )
+      if (idx >= 0) this.data.alignableAnnotations.splice(idx, 1)
+      this.data.length = this.data.alignableAnnotations.length
+    }
+
+    for (const tier of this.data.tiers) {
+      const idx = tier.annotations.findIndex((a) => a.id === annotationId)
+      if (idx >= 0) tier.annotations.splice(idx, 1)
+    }
+
+    delete this.data.annotations[annotationId]
+
+    this.refreshTableView()
+    this.emitEafUpdated()
+    return true
+  }
+
+  private formatTimeValue(seconds: number): string {
+    return this.inMilliseconds
+      ? String(Math.round(seconds * 1000))
+      : String(seconds)
+  }
+
+  private nextAnnotationId(): string {
+    if (!this.data) return 'a1'
+    let max = 0
+    for (const id of Object.keys(this.data.annotations)) {
+      const m = id.match(/^a(\d+)$/i)
+      if (m) max = Math.max(max, parseInt(m[1], 10))
+    }
+    return `a${max + 1}`
+  }
+
+  /** `offset` lets a single call site reserve two consecutive ids. */
+  private nextTimeSlotId(offset = 0): string {
+    let max = 0
+    if (this.data) {
+      for (const id of Object.keys(this.data.timeOrder)) {
+        const m = id.match(/^ts(\d+)$/i)
+        if (m) max = Math.max(max, parseInt(m[1], 10))
+      }
+    }
+    if (this.xmlDoc) {
+      this.xmlDoc.querySelectorAll('TIME_SLOT').forEach((el) => {
+        const id = el.getAttribute('TIME_SLOT_ID') ?? ''
+        const m = id.match(/^ts(\d+)$/i)
+        if (m) max = Math.max(max, parseInt(m[1], 10))
+      })
+    }
+    return `ts${max + 1 + offset}`
   }
 
   /** First visible alignable whose interval contains `time` (respects `tiers` filter). */
