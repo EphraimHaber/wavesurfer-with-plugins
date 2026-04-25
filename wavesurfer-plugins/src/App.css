@@ -473,6 +473,83 @@ body::before {
   width: min(100%, 34rem);
 }
 
+.elan-review-board {
+  background: #0d0f14;
+  border: 1px solid #232733;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.elan-review-row {
+  display: grid;
+  grid-template-columns: 10.5rem minmax(0, 1fr);
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid #202531;
+  background: transparent;
+  color: #e7e9ee;
+  padding: 0;
+  cursor: pointer;
+}
+
+.elan-review-row:last-child {
+  border-bottom: 0;
+}
+
+.elan-review-row:hover {
+  background: #151923;
+}
+
+.elan-review-row.is-pending {
+  box-shadow: inset 2px 0 0 #e8682a;
+}
+
+.elan-review-time {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #8e94a4;
+  padding: 0.95rem 1rem;
+  border-right: 1px solid #202531;
+  align-self: stretch;
+  display: flex;
+  align-items: flex-start;
+}
+
+.elan-review-main {
+  padding: 0.95rem 1.05rem;
+}
+
+.elan-review-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 0.25rem;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #9ca3b4;
+}
+
+.elan-review-completion {
+  color: #e8682a;
+}
+
+@media (max-width: 900px) {
+  .elan-review-row {
+    grid-template-columns: 1fr;
+  }
+
+  .elan-review-time {
+    border-right: 0;
+    border-bottom: 1px solid #202531;
+    padding-bottom: 0.5rem;
+  }
+}
+
 @media (max-width: 900px) {
   .elan-mode-grid {
     grid-template-columns: 1fr;
