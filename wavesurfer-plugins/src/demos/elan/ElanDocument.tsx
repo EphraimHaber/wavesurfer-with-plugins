@@ -153,7 +153,7 @@ export function ElanDocument({
                 </button>
 
                 {isOpen ? (
-                  <div className="mt-2 pl-4 border-l-2 border-sage-soft flex flex-col gap-2.5">
+                  <div className="elan-note-thread mt-2 pl-3 border-l-2 border-sage-soft flex flex-wrap items-start gap-2.5">
                     {noteCells.map((cell) => {
                       const isSelected =
                         !!cell.annotationId && selectedId === cell.annotationId;
@@ -161,12 +161,12 @@ export function ElanDocument({
                         <div
                           key={`${row.alignableId}-${cell.tierId}`}
                           className={[
-                            "flex flex-col md:flex-row md:items-start gap-2 md:gap-3",
-                            "px-2 py-2 rounded-paper border border-transparent bg-paper/35",
+                            "elan-note-item flex flex-col gap-2",
+                            "px-2.5 py-2 rounded-paper border border-transparent bg-paper/35",
                             isSelected ? "border-sage/40 bg-sage-soft/45" : "",
                           ].join(" ")}
                         >
-                          <div className="md:w-38 shrink-0 flex items-center justify-between gap-2">
+                          <div className="flex items-center justify-between gap-2">
                             <button
                               type="button"
                               className="font-mono text-[0.64rem] uppercase tracking-[0.08em] text-ink-soft hover:text-ink"
@@ -197,7 +197,7 @@ export function ElanDocument({
                               }
                               onFocus={() => onSelect(cell.annotationId!, cell.start)}
                               onBlur={(e) => onEdit(cell.annotationId!, e.target.value)}
-                              className="w-full min-h-18 resize-y rounded-paper border border-rule bg-cream px-2.5 py-2 font-display text-[0.95rem] leading-relaxed text-ink focus:outline-none focus:ring-2 focus:ring-sage/40"
+                              className="w-full min-h-20 resize-y rounded-paper border border-rule bg-cream px-2.5 py-2.5 font-display text-[1rem] leading-relaxed text-ink focus:outline-none focus:ring-2 focus:ring-sage/40"
                               placeholder={`${cell.tierId} note`}
                             />
                           ) : (

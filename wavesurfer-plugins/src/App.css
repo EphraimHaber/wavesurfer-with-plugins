@@ -465,6 +465,14 @@ body::before {
   -webkit-line-clamp: 2;
 }
 
+.elan-note-thread {
+  align-content: flex-start;
+}
+
+.elan-note-item {
+  width: min(100%, 34rem);
+}
+
 @media (max-width: 900px) {
   .elan-mode-grid {
     grid-template-columns: 1fr;

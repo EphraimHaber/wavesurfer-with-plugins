@@ -55,6 +55,8 @@ export function ElanDemo() {
   const [draftById, setDraftById] = useState<Record<string, string>>({});
   const [segmentQuery, setSegmentQuery] = useState("");
   const [showOnlyNeedsText, setShowOnlyNeedsText] = useState(false);
+  const [writerOpen, setWriterOpen] = useState(false);
+  const [composeDetailsOpen, setComposeDetailsOpen] = useState(false);
 
   // Keep latest selected tier accessible from event handlers without re-binding
   useEffect(() => {
@@ -408,6 +410,32 @@ export function ElanDemo() {
     });
   }, [segmentRows, segmentQuery, showOnlyNeedsText]);
 
+  const activeSegmentId = selectedAligned?.id ?? null;
+  const activeSegmentIndex = activeSegmentId
+    ? segmentRows.findIndex((row) => row.id === activeSegmentId)
+    : -1;
+  const nextIncompleteSegment = segmentRows.find((row) => row.needsText) ?? null;
+
+  const applySelectedDraft = useCallback(() => {
+    if (!selectedAnnot) return;
+    const value = draftById[selectedAnnot.id] ?? selectedAnnot.value ?? "";
+    if (value !== selectedAnnot.value) {
+      onEditValue(selectedAnnot.id, value);
+    }
+  }, [draftById, onEditValue, selectedAnnot]);
+
+  const focusedComposeTable = useMemo(() => {
+    if (!elanTable) return null;
+    const focusId = selectedAligned?.id ?? null;
+    const row = focusId
+      ? elanTable.rows.find((item) => item.alignableId === focusId)
+      : null;
+    return {
+      columns: elanTable.columns,
+      rows: row ? [row] : [],
+    };
+  }, [elanTable, selectedAligned?.id]);
+
   return (
     <div className="elan-demo space-y-4">
       <header className="elan-header border border-rule rounded-paper bg-paper shadow-paper px-4 py-3">
@@ -429,7 +457,7 @@ export function ElanDemo() {
 
       <AudioControls wsRef={wsRef} />
 
-      <div className="elan-shell grid gap-4 xl:grid-cols-[18rem_minmax(0,1fr)_22rem]">
+      <div className="elan-shell grid gap-4 xl:grid-cols-[16rem_minmax(0,1fr)_19rem]">
         <aside className="border border-rule rounded-paper bg-paper shadow-paper p-3 md:p-4 xl:sticky xl:top-3 h-fit max-h-[74vh] overflow-hidden flex flex-col">
           <div className="pb-2 border-b border-rule-soft">
             <h3 className="m-0 font-mono text-[0.68rem] uppercase tracking-widest text-ink-soft">
@@ -610,34 +638,80 @@ export function ElanDemo() {
             </span>
           </div>
 
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={view}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.22, ease: "easeOut" }}
-              className="elan-view-shell"
-            >
-              {view === "document" ? (
-                elanData && elanTable ? (
-                  <ElanDocument
-                    data={elanData}
-                    table={elanTable}
-                    selectedId={selectedId}
-                    onSelect={onSelectBlock}
-                    onEdit={onEditValue}
-                    onCreateRef={onCreateRef}
-                  />
+          {workflowMode === "compose" ? (
+            <div className="elan-view-shell">
+              <div className="flex flex-wrap items-center gap-2">
+                <h4 className="m-0 font-mono text-[0.64rem] uppercase tracking-widest text-ink-soft">
+                  Segment details
+                </h4>
+                <span className="font-display text-[0.9rem] text-ink-mute">
+                  Keep this collapsed while writing to avoid context jumps.
+                </span>
+                <span className="flex-1" />
+                <button
+                  type="button"
+                  onClick={() => setComposeDetailsOpen((cur) => !cur)}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-paper border border-rule bg-paper font-mono text-[0.63rem] uppercase tracking-[0.08em] text-ink-soft hover:text-ink"
+                >
+                  {composeDetailsOpen ? "Hide details" : "Show details"}
+                </button>
+              </div>
+              {composeDetailsOpen ? (
+                elanData && focusedComposeTable ? (
+                  focusedComposeTable.rows.length > 0 ? (
+                    <div className="mt-2">
+                      <ElanDocument
+                        data={elanData}
+                        table={focusedComposeTable}
+                        selectedId={selectedId}
+                        onSelect={onSelectBlock}
+                        onEdit={onEditValue}
+                        onCreateRef={onCreateRef}
+                      />
+                    </div>
+                  ) : (
+                    <p className="m-0 mt-2 font-display italic text-[0.95rem] text-ink-soft">
+                      Select a segment from the queue to load its detail panel.
+                    </p>
+                  )
                 ) : (
-                  <EmptyLoading />
+                  <div className="mt-2">
+                    <EmptyLoading />
+                  </div>
                 )
-              ) : view === "lanes" ? (
-                elanData && elanTable && duration > 0 ? (
-                  <ElanLanes
+              ) : null}
+            </div>
+          ) : (
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={view}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.22, ease: "easeOut" }}
+                className="elan-view-shell"
+              >
+                {view === "lanes" ? (
+                  elanData && elanTable && duration > 0 ? (
+                    <ElanLanes
+                      data={elanData}
+                      table={elanTable}
+                      duration={duration}
+                      selectedId={selectedId}
+                      editingId={editingId}
+                      setEditingId={setEditingId}
+                      onSelect={onSelectBlock}
+                      onDelete={onDeleteAnnotation}
+                      onEdit={onEditValue}
+                      onCreateRef={onCreateRef}
+                    />
+                  ) : (
+                    <EmptyLoading />
+                  )
+                ) : elanData && elanTable ? (
+                  <ElanTable
                     data={elanData}
                     table={elanTable}
-                    duration={duration}
                     selectedId={selectedId}
                     editingId={editingId}
                     setEditingId={setEditingId}
@@ -648,24 +722,117 @@ export function ElanDemo() {
                   />
                 ) : (
                   <EmptyLoading />
-                )
-              ) : elanData && elanTable ? (
-                <ElanTable
-                  data={elanData}
-                  table={elanTable}
-                  selectedId={selectedId}
-                  editingId={editingId}
-                  setEditingId={setEditingId}
-                  onSelect={onSelectBlock}
-                  onDelete={onDeleteAnnotation}
-                  onEdit={onEditValue}
-                  onCreateRef={onCreateRef}
-                />
-              ) : (
-                <EmptyLoading />
-              )}
-            </motion.div>
-          </AnimatePresence>
+                )}
+              </motion.div>
+            </AnimatePresence>
+          )}
+
+          {selectedAnnot ? (
+            <section className="border border-rule rounded-paper bg-cream/65 p-3 md:p-4">
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                <h3 className="m-0 font-mono text-[0.68rem] uppercase tracking-widest text-ink-soft">
+                  Writing Studio
+                </h3>
+                <code className="bg-paper text-ink px-1.5 py-0.5 rounded border border-rule font-mono text-[0.72rem]">
+                  {selectedAnnot.id}
+                </code>
+                <span className="font-mono text-[0.66rem] uppercase tracking-[0.08em] text-ink-mute">
+                  {selectedDraftValue.length} chars
+                </span>
+                <span className="flex-1" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (activeSegmentIndex > 0) {
+                      const prev = segmentRows[activeSegmentIndex - 1];
+                      if (prev) onSelectBlock(prev.id, prev.start);
+                    }
+                  }}
+                  disabled={activeSegmentIndex <= 0}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-paper border border-rule bg-paper font-mono text-[0.64rem] uppercase tracking-[0.08em] text-ink-soft hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Prev
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (
+                      activeSegmentIndex >= 0 &&
+                      activeSegmentIndex < segmentRows.length - 1
+                    ) {
+                      const next = segmentRows[activeSegmentIndex + 1];
+                      if (next) onSelectBlock(next.id, next.start);
+                    }
+                  }}
+                  disabled={
+                    activeSegmentIndex < 0 ||
+                    activeSegmentIndex >= segmentRows.length - 1
+                  }
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-paper border border-rule bg-paper font-mono text-[0.64rem] uppercase tracking-[0.08em] text-ink-soft hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (nextIncompleteSegment) {
+                      onSelectBlock(
+                        nextIncompleteSegment.id,
+                        nextIncompleteSegment.start,
+                      );
+                    }
+                  }}
+                  disabled={!nextIncompleteSegment}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-paper border border-sage bg-transparent text-sage font-mono text-[0.64rem] uppercase tracking-[0.08em] hover:bg-sage hover:text-cream disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next incomplete
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWriterOpen((cur) => !cur)}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-paper border border-ink bg-transparent text-ink font-mono text-[0.64rem] uppercase tracking-[0.08em] hover:bg-ink hover:text-cream"
+                >
+                  {writerOpen ? "Compact" : "Expand"}
+                </button>
+              </div>
+              <textarea
+                value={selectedDraftValue}
+                onChange={(e) =>
+                  setDraftById((cur) => ({
+                    ...cur,
+                    [selectedAnnot.id]: e.target.value,
+                  }))
+                }
+                onBlur={applySelectedDraft}
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                    e.preventDefault();
+                    applySelectedDraft();
+                  }
+                }}
+                className={[
+                  "w-full resize-y overflow-y-auto rounded-paper border border-rule bg-paper px-5 py-4 font-display text-[1.14rem] leading-[1.82] text-ink",
+                  "focus:outline-none focus:ring-2 focus:ring-ochre/45",
+                  writerOpen ? "h-[78vh] max-h-[88vh]" : "h-96 max-h-[72vh]",
+                ].join(" ")}
+                placeholder="Write full transcript text for this segment..."
+                aria-label={`Long-form text for ${selectedAnnot.id}`}
+              />
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <p className="m-0 font-mono text-[0.63rem] uppercase tracking-[0.07em] text-ink-mute">
+                  Cmd/Ctrl+Enter applies changes
+                </p>
+                <span className="flex-1" />
+                <button
+                  type="button"
+                  onClick={applySelectedDraft}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-paper border border-ink bg-cream text-ink font-mono text-[0.66rem] uppercase tracking-[0.08em] hover:bg-ink hover:text-cream transition"
+                >
+                  Apply text
+                </button>
+              </div>
+            </section>
+          ) : null}
         </section>
 
         <aside className="border border-rule rounded-paper bg-paper shadow-paper p-3 md:p-4 xl:sticky xl:top-3 h-fit">
@@ -697,53 +864,19 @@ export function ElanDemo() {
                   </div>
                 </div>
 
-                <div>
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <span className="font-mono text-[0.66rem] uppercase tracking-[0.08em] text-ink-soft">
-                      Text
-                    </span>
-                    <span className="font-mono text-[0.68rem] tabular-nums text-ink-mute">
-                      {selectedDraftValue.length} chars
-                    </span>
-                  </div>
-                  <textarea
-                    value={selectedDraftValue}
-                    onChange={(e) =>
-                      setDraftById((cur) => ({
-                        ...cur,
-                        [selectedAnnot.id]: e.target.value,
-                      }))
-                    }
-                    onBlur={() => {
-                      if (selectedDraftValue !== selectedAnnot.value) {
-                        onEditValue(selectedAnnot.id, selectedDraftValue);
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                        e.preventDefault();
-                        if (selectedDraftValue !== selectedAnnot.value) {
-                          onEditValue(selectedAnnot.id, selectedDraftValue);
-                        }
-                      }
-                    }}
-                    className="w-full min-h-28 resize-y rounded-paper border border-rule bg-cream px-3 py-2 font-display text-[0.95rem] leading-relaxed text-ink focus:outline-none focus:ring-2 focus:ring-ochre/45"
-                    placeholder="Annotation text..."
-                    aria-label={`Annotation text for ${selectedAnnot.id}`}
-                  />
-                  <p className="m-0 mt-1.5 font-mono text-[0.63rem] uppercase tracking-[0.07em] text-ink-mute">
-                    Cmd/Ctrl+Enter to apply now
-                  </p>
-                </div>
+                <p className="m-0 font-display text-[0.94rem] leading-relaxed text-ink-soft">
+                  Edit long text in the Writing Studio under the main workspace. This
+                  panel keeps quick controls only.
+                </p>
 
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={() => setEditingId(selectedAnnot.id)}
+                    onClick={() => setWriterOpen(true)}
                     className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-paper border border-ink bg-cream text-ink font-mono text-[0.68rem] uppercase tracking-[0.08em] hover:bg-ink hover:text-cream transition"
                   >
                     <Pencil size={12} strokeWidth={1.75} />
-                    Inline edit
+                    Expand writer
                   </button>
                   <button
                     type="button"
